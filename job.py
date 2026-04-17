@@ -7,9 +7,11 @@ import tempfile
 
 from core.config import settings
 from core.logging import setup_logging
+from db.session import SessionLocal
 from services.blob_service import download_glb, upload_usdz
 from services.blender_service import run_blender_conversion
 from services.callback_service import post_callback
+from services.db_service import save_usdz_asset, update_product_status
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -24,18 +26,19 @@ def get_required_env(name: str) -> str:
 
 
 async def run_job() -> None:
-    job_id = get_required_env("JOB_ID")
-    glb_blob_url = get_required_env("GLB_BLOB_URL")
+    job_id           = get_required_env("JOB_ID")
+    glb_blob_url     = get_required_env("GLB_BLOB_URL")
     output_blob_name = get_required_env("OUTPUT_BLOB_NAME")
-    product_id = get_required_env("PRODUCT_ID")
-    user_id = get_required_env("USER_ID")
-    callback_url = os.environ.get("CALLBACK_URL")
+    product_id       = get_required_env("PRODUCT_ID")
+    user_id          = get_required_env("USER_ID")
+    product_name     = get_required_env("PRODUCT_NAME")
+    callback_url     = os.environ.get("CALLBACK_URL")
 
     logger.info(f"[Job {job_id}] Starting — product={product_id} user={user_id}")
 
     tmp_dir = tempfile.mkdtemp(prefix=f"job_{job_id}_")
     try:
-        glb_path = os.path.join(tmp_dir, "model.glb")
+        glb_path  = os.path.join(tmp_dir, "model.glb")
         usdz_path = os.path.join(tmp_dir, "model.usdz")
 
         logger.info(f"[Job {job_id}] Downloading GLB from {glb_blob_url}")
@@ -51,6 +54,13 @@ async def run_job() -> None:
         usdz_url = await upload_usdz(usdz_path, output_blob_name)
 
         logger.info(f"[Job {job_id}] Conversion succeeded — {usdz_url}")
+
+        db = SessionLocal()
+        try:
+            save_usdz_asset(db, usdz_url, usdz_path, product_id, user_id, product_name)
+            update_product_status(db, product_id, "READY")
+        finally:
+            db.close()
 
         if callback_url:
             await post_callback(callback_url, {
