@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     blender_bin: str = "blender"
     log_level: str = "INFO"
     database_url: str = ""
+    azure_blob_base_url: str = ""
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

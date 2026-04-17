@@ -50,14 +50,17 @@ async def run_job() -> None:
         if not os.path.exists(usdz_path):
             raise FileNotFoundError(f"USDZ file not produced at {usdz_path}")
 
-        logger.info(f"[Job {job_id}] Uploading USDZ as {output_blob_name}")
-        usdz_url = await upload_usdz(usdz_path, output_blob_name)
+        blob_path = f"{user_id}/{product_id}/{output_blob_name}"
+        logger.info(f"[Job {job_id}] Uploading USDZ as {blob_path}")
+        usdz_url = await upload_usdz(usdz_path, blob_path)
 
         logger.info(f"[Job {job_id}] Conversion succeeded — {usdz_url}")
 
+        blob_url = f"{settings.azure_blob_base_url.rstrip('/')}/{settings.storage_container}/{blob_path}"
+
         db = SessionLocal()
         try:
-            save_usdz_asset(db, usdz_url, usdz_path, product_id, user_id, product_name)
+            save_usdz_asset(db, blob_url, usdz_path, product_id, user_id, product_name)
             update_product_status(db, product_id, "READY")
         finally:
             db.close()
