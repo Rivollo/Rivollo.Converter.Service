@@ -3,13 +3,11 @@ on:
   push:
     branches:
       - main
-
 jobs:
   build:
     runs-on: ubuntu-latest
     environment:
       name: Dev
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,6 +39,12 @@ jobs:
         with:
           context: .
           push: true
+          # Fix: Target only linux/amd64 (ACI requirement) and disable
+          # provenance/SBOM attestations which generate the os:unknown
+          # manifest entry that causes "invalid operating system" in ACI
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
           tags: |
             ${{ env.IMAGE_NUM }}
             ${{ env.IMAGE_LATEST }}
