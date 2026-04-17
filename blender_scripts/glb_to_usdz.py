@@ -1,6 +1,7 @@
 """
 Blender headless script — runs inside Blender's Python environment.
 Usage (invoked by blender_service.py):
+
   blender --background --python glb_to_usdz.py -- --input /path/model.glb --output /path/model.usdz
 """
 
