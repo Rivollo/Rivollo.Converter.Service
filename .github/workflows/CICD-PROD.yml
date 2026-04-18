@@ -1,16 +1,13 @@
 name: CI - Build & Push Docker Image to ACR (Prod)
-
 on:
   push:
     branches:
       - main
-
 jobs:
   build:
     runs-on: ubuntu-latest
     environment:
       name: Prod
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,12 +31,20 @@ jobs:
           echo "TAG_LATEST=${TAG_LATEST}" >> $GITHUB_ENV
           echo "IMAGE_NUM=${{ secrets.ACR_LOGIN_SERVER }}/${{ secrets.IMAGE_NAME }}:${TAG_NUM}"       >> $GITHUB_ENV
           echo "IMAGE_LATEST=${{ secrets.ACR_LOGIN_SERVER }}/${{ secrets.IMAGE_NAME }}:${TAG_LATEST}" >> $GITHUB_ENV
+          echo "Using numeric tag: ${TAG_NUM}"
+          echo "IMAGE_NUM set to: ${{ secrets.ACR_LOGIN_SERVER }}/${{ secrets.IMAGE_NAME }}:${TAG_NUM}"
 
       - name: Build and push (both numeric and latest)
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          # Fix: Target only linux/amd64 (ACI requirement) and disable
+          # provenance/SBOM attestations which generate the os:unknown
+          # manifest entry that causes "invalid operating system" in ACI
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
           tags: |
             ${{ env.IMAGE_NUM }}
             ${{ env.IMAGE_LATEST }}
@@ -47,7 +52,11 @@ jobs:
       - name: Print pushed image digests (traceability)
         run: |
           echo "GIT_COMMIT=${GITHUB_SHA}"
+          echo "Pulling numeric tag: ${{ env.IMAGE_NUM }}"
           docker pull "${{ env.IMAGE_NUM }}"
+          echo "Numeric image repo digests:"
           docker inspect --format='{{index .RepoDigests 0}}' "${{ env.IMAGE_NUM }}" || true
+          echo "Pulling latest: ${{ env.IMAGE_LATEST }}"
           docker pull "${{ env.IMAGE_LATEST }}"
+          echo "Latest image repo digests:"
           docker inspect --format='{{index .RepoDigests 0}}' "${{ env.IMAGE_LATEST }}" || true
