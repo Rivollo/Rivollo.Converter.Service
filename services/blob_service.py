@@ -33,6 +33,6 @@ def _upload_usdz_sync(local_path: str, blob_name: str) -> str:
     with open(local_path, "rb") as f:
         blob_client.upload_blob(f, overwrite=True, content_settings=content_settings)
 
-    url = f"{settings.cdn_base_url.rstrip('/')}/{blob_name}"
+    url = f"{settings.cdn_base_url.rstrip('/')}/{settings.storage_container}/{blob_name}"
     logger.debug(f"Uploaded USDZ to {url}")
     return url

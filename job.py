@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import logging
 import os
@@ -17,22 +18,28 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
-def get_required_env(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        logger.error(f"Missing required environment variable: {name}")
-        sys.exit(1)
-    return value
+def parse_args():
+    parser = argparse.ArgumentParser(description="USDZ Converter Job")
+    parser.add_argument("--job-id",           required=True)
+    parser.add_argument("--glb-blob-url",     required=True)
+    parser.add_argument("--output-blob-name", required=True)
+    parser.add_argument("--product-id",       required=True)
+    parser.add_argument("--user-id",          required=True)
+    parser.add_argument("--product-name",     required=True)
+    parser.add_argument("--callback-url",     required=False, default=None)
+    return parser.parse_args()
 
 
 async def run_job() -> None:
-    job_id           = get_required_env("JOB_ID")
-    glb_blob_url     = get_required_env("GLB_BLOB_URL")
-    output_blob_name = get_required_env("OUTPUT_BLOB_NAME")
-    product_id       = get_required_env("PRODUCT_ID")
-    user_id          = get_required_env("USER_ID")
-    product_name     = get_required_env("PRODUCT_NAME")
-    callback_url     = os.environ.get("CALLBACK_URL")
+    args = parse_args()
+
+    job_id           = args.job_id
+    glb_blob_url     = args.glb_blob_url
+    output_blob_name = args.output_blob_name
+    product_id       = args.product_id
+    user_id          = args.user_id
+    product_name     = args.product_name
+    callback_url     = args.callback_url
 
     logger.info(f"[Job {job_id}] Starting — product={product_id} user={user_id}")
 

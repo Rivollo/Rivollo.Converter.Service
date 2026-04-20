@@ -35,4 +35,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["python3", "job.py"]
+ENTRYPOINT ["python3", "job.py"]
