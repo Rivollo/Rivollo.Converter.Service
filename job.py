@@ -44,6 +44,7 @@ async def run_job() -> None:
     logger.info(f"[Job {job_id}] Starting — product={product_id} user={user_id}")
 
     tmp_dir = tempfile.mkdtemp(prefix=f"job_{job_id}_")
+    
     try:
         glb_path  = os.path.join(tmp_dir, "model.glb")
         usdz_path = os.path.join(tmp_dir, "model.usdz")
