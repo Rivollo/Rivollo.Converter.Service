@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="USDZ Converter Job")
-    parser.add_argument("--job-id",           required=False, default=None)
+    parser.add_argument("--job-id",           required=True)
     parser.add_argument("--glb-blob-url",     required=True)
     parser.add_argument("--output-blob-name", required=True)
     parser.add_argument("--product-id",       required=True)
