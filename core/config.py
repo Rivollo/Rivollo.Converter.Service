@@ -3,9 +3,9 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    azure_storage_conn_string: str
-    storage_container: str
-    cdn_base_url: str
+    azure_storage_conn_string: str = ""
+    storage_container: str = ""
+    cdn_base_url: str = ""
     blender_bin: str = "blender"
     log_level: str = "INFO"
     database_url: str = ""
