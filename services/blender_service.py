@@ -27,7 +27,6 @@ def _run_blender_sync(glb_path: str, usdz_path: str, job_id: str) -> None:
         "--",
         "--input", glb_path,
         "--output", usdz_path,
-        "--bake-resolution", str(settings.bake_resolution),
     ]
 
     logger.info(f"[Job {job_id}] Blender command: {' '.join(cmd)}")
@@ -52,7 +51,7 @@ def _run_blender_sync(glb_path: str, usdz_path: str, job_id: str) -> None:
             raise RuntimeError(
                 f"[Job {job_id}] Blender was killed by the OS (SIGKILL / OOM). "
                 f"The container ran out of memory during conversion. "
-                f"Increase the container memory limit or reduce BAKE_RESOLUTION (currently {settings.bake_resolution})."
+                f"Increase the container memory limit."
             )
         raise RuntimeError(
             f"[Job {job_id}] Blender exited with code {result.returncode}. "
