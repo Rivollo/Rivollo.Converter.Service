@@ -24,6 +24,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Convert GLB to USDZ via Blender")
     parser.add_argument("--input", required=True, help="Path to input .glb file")
     parser.add_argument("--output", required=True, help="Path to output .usdz file")
+    parser.add_argument("--bake-resolution", type=int, default=1024, help="Bake texture resolution (px)")
     return parser.parse_args(script_args)
 
 
@@ -39,13 +40,13 @@ def import_glb(filepath: str):
     bpy.ops.import_scene.gltf(filepath=filepath)
 
 
-def handle_textures(tex_dir: str):
+def handle_textures(tex_dir: str, bake_resolution: int = 1024):
     has_packed = any(img.packed_file is not None for img in bpy.data.images)
 
     if has_packed:
         _unpack_embedded_textures(tex_dir)
     else:
-        _bake_vertex_colors(tex_dir)
+        _bake_vertex_colors(tex_dir, bake_resolution)
 
 
 def _unpack_embedded_textures(tex_dir: str):
@@ -60,7 +61,7 @@ def _unpack_embedded_textures(tex_dir: str):
         print(f"Unpacked texture: {dest}")
 
 
-def _bake_vertex_colors(tex_dir: str):
+def _bake_vertex_colors(tex_dir: str, bake_resolution: int = 1024):
     os.makedirs(tex_dir, exist_ok=True)
     bpy.context.scene.render.engine = "CYCLES"
     bpy.context.scene.cycles.device = "CPU"
@@ -83,7 +84,7 @@ def _bake_vertex_colors(tex_dir: str):
 
         # Create bake target image
         bake_image_name = f"{obj.name}_baked"
-        bake_img = bpy.data.images.new(bake_image_name, width=2048, height=2048)
+        bake_img = bpy.data.images.new(bake_image_name, width=bake_resolution, height=bake_resolution)
         bake_img_path = os.path.join(tex_dir, f"{bake_image_name}.png")
 
         # Set up material nodes for baking
@@ -91,7 +92,6 @@ def _bake_vertex_colors(tex_dir: str):
         if mat is None:
             mat = bpy.data.materials.new(name=f"{obj.name}_mat")
             obj.data.materials.append(mat)
-        mat.use_nodes = True
         nodes = mat.node_tree.nodes
         links = mat.node_tree.links
         nodes.clear()
@@ -144,7 +144,7 @@ def main():
     clear_scene()
     enable_gltf_addon()
     import_glb(input_path)
-    handle_textures(tex_dir)
+    handle_textures(tex_dir, args.bake_resolution)
     export_usdz(output_path)
 
     if not os.path.exists(output_path):

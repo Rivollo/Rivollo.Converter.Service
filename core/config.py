@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     storage_container: str = ""
     cdn_base_url: str = ""
     blender_bin: str = "blender"
+    bake_resolution: int = 1024
     log_level: str = "INFO"
     database_url: str = ""
     azure_blob_base_url: str = ""
