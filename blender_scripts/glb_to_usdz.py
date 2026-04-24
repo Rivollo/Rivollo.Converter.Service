@@ -11,6 +11,7 @@ Called via:
 
 import os
 import sys
+import zipfile
 import bpy
 
 
@@ -25,13 +26,25 @@ def parse_args():
     args = argv[argv.index("--") + 1:]
     input_path, output_path = None, None
     for i, arg in enumerate(args):
-        if arg == "--input":
+        if arg == "--input" and i + 1 < len(args):
             input_path = args[i + 1]
-        elif arg == "--output":
+        elif arg == "--output" and i + 1 < len(args):
             output_path = args[i + 1]
     if not input_path or not output_path:
         raise ValueError("Both --input and --output are required.")
     return input_path, output_path
+
+
+def verify_usdz(path: str) -> bool:
+    """Confirm output is a valid USDZ: a ZIP archive containing a .usdc/.usda file."""
+    if not zipfile.is_zipfile(path):
+        return False
+    with zipfile.ZipFile(path, "r") as zf:
+        names = zf.namelist()
+        has_usd = any(n.lower().endswith((".usdc", ".usda", ".usd")) for n in names)
+        if has_usd:
+            print(f"[Blender] USDZ contents: {names}")
+        return has_usd
 
 
 def main():
@@ -48,18 +61,51 @@ def main():
     print(f"[Blender] Importing GLB: {input_path}")
     bpy.ops.import_scene.gltf(filepath=input_path)
 
-    # ── Step 4: Export directly to .usdz (native in Blender 5.0) ─────
-    # Note: export_textures_mode valid values in Blender 5.0: 'KEEP', 'PRESERVE', 'NEW'
+    # ── Step 4: Prepare meshes ────────────────────────────────────────
+    # Apply transforms so geometry is baked correctly into USD space.
+    # Triangulate: iPhone Quick Look requires triangle-only meshes.
+    for obj in bpy.context.scene.objects:
+        if obj.type != "MESH":
+            continue
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+        tri_mod = obj.modifiers.new(name="Triangulate", type="TRIANGULATE")
+        tri_mod.quad_method = "BEAUTY"
+        tri_mod.ngon_method = "BEAUTY"
+        bpy.ops.object.modifier_apply(modifier=tri_mod.name)
+        obj.select_set(False)
+
+    bpy.ops.object.select_all(action="DESELECT")
+
+    # ── Step 5: Export to .usdz ───────────────────────────────────────
+    # generate_preview_surface: converts Blender materials to UsdPreviewSurface,
+    # Apple's standard PBR shader — required for correct rendering in iPhone Quick Look.
+    # export_uvmaps + export_normals: ensures textures and shading transfer correctly.
+    # export_textures + export_textures_mode='NEW': embeds textures inside the ZIP.
     print(f"[Blender] Exporting USDZ: {output_path}")
     result = bpy.ops.wm.usd_export(
         filepath=output_path,
         export_materials=True,
-        export_textures_mode='NEW',
+        generate_preview_surface=True,
+        export_textures=True,
+        export_textures_mode="NEW",
+        export_uvmaps=True,
+        export_normals=True,
+        export_mesh_colors=False,
+        use_instancing=False,
+        root_prim_path="/Root",
     )
     print(f"[Blender] Export result: {result}")
 
+    # ── Step 6: Validate output ───────────────────────────────────────
     if not os.path.exists(output_path):
         raise RuntimeError(f"USD export returned {result} but file not found: {output_path}")
+
+    if not verify_usdz(output_path):
+        raise RuntimeError(
+            f"Output is not a valid USDZ archive (expected ZIP with .usdc inside): {output_path}"
+        )
 
     print(f"[Blender] Done → {output_path} ({os.path.getsize(output_path)} bytes)")
 
