@@ -59,3 +59,11 @@ def _run_blender_sync(glb_path: str, usdz_path: str, job_id: str) -> None:
         )
 
     logger.info(f"[Job {job_id}] Blender process completed successfully")
+
+    if not os.path.exists(usdz_path):
+        logger.error(f"[Job {job_id}] Blender stdout:\n{result.stdout[-500:]}")
+        raise RuntimeError(
+            f"[Job {job_id}] Blender exited 0 but did not create the USDZ file: {usdz_path}"
+        )
+
+    logger.info(f"[Job {job_id}] USDZ file verified ({os.path.getsize(usdz_path)} bytes)")
