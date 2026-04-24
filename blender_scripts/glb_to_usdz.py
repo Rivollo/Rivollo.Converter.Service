@@ -114,12 +114,7 @@ def main():
         filepath=output_path,
         export_materials=True,
         generate_preview_surface=True,
-        export_textures=True,
         export_textures_mode="NEW",
-        export_uvmaps=True,
-        export_normals=True,
-        export_mesh_colors=False,
-        use_instancing=False,
         root_prim_path="/Root",
     )
     print(f"[Blender] Export result: {result}")
