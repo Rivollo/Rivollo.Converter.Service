@@ -4,6 +4,7 @@ Blender headless script: GLB → USDZ conversion.
 Confirmed working on Blender 5.0.1 (snap) on Ubuntu.
 Blender 5.0 supports native .usdz export — no manual zip workaround needed.
 
+
 Called via:
   blender --background --python app/services/blender_scripts/glb_to_usdz.py \
           -- --input /path/to/model.glb --output /path/to/model.usdz
