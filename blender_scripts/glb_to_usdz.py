@@ -35,16 +35,42 @@ def parse_args():
     return input_path, output_path
 
 
+def repack_usdz_ios_compatible(path: str) -> None:
+    """
+    Repack the USDZ as an uncompressed ZIP (ZIP_STORED).
+    iOS Quick Look strictly requires STORE compression — DEFLATE causes "No file to preview".
+    The primary .usdc/.usda file must also be the first entry in the archive.
+    """
+    tmp_path = path + ".repack.tmp"
+    with zipfile.ZipFile(path, "r") as src:
+        entries = src.infolist()
+        # Primary USD file must be first — iOS Quick Look reads the first entry as the scene root
+        entries.sort(key=lambda e: (
+            0 if e.filename.lower().endswith((".usdc", ".usda", ".usd")) else 1,
+            e.filename,
+        ))
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_STORED) as dst:
+            for entry in entries:
+                dst.writestr(entry, src.read(entry.filename))
+    os.replace(tmp_path, path)
+    print(f"[Blender] Repacked USDZ as uncompressed ZIP (iOS compatible)")
+
+
 def verify_usdz(path: str) -> bool:
-    """Confirm output is a valid USDZ: a ZIP archive containing a .usdc/.usda file."""
+    """Confirm output is a valid, iOS-compatible USDZ."""
     if not zipfile.is_zipfile(path):
         return False
     with zipfile.ZipFile(path, "r") as zf:
-        names = zf.namelist()
+        entries = zf.infolist()
+        names = [e.filename for e in entries]
         has_usd = any(n.lower().endswith((".usdc", ".usda", ".usd")) for n in names)
-        if has_usd:
-            print(f"[Blender] USDZ contents: {names}")
-        return has_usd
+        if not has_usd:
+            return False
+        compressed = [e.filename for e in entries if e.compress_type != zipfile.ZIP_STORED]
+        if compressed:
+            print(f"[Blender] WARNING: compressed entries found (iOS will reject): {compressed}")
+        print(f"[Blender] USDZ contents: {names}")
+        return True
 
 
 def main():
@@ -98,10 +124,13 @@ def main():
     )
     print(f"[Blender] Export result: {result}")
 
-    # ── Step 6: Validate output ───────────────────────────────────────
+    # ── Step 6: Repack as iOS-compatible uncompressed ZIP ────────────
     if not os.path.exists(output_path):
         raise RuntimeError(f"USD export returned {result} but file not found: {output_path}")
 
+    repack_usdz_ios_compatible(output_path)
+
+    # ── Step 7: Validate output ───────────────────────────────────────
     if not verify_usdz(output_path):
         raise RuntimeError(
             f"Output is not a valid USDZ archive (expected ZIP with .usdc inside): {output_path}"
