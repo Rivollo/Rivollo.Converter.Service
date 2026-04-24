@@ -55,8 +55,6 @@ def main():
         filepath=output_path,
         export_materials=True,
         export_textures_mode='NEW',
-        generate_preview_surface=True,
-        overwrite_textures=True,
     )
     print(f"[Blender] Export result: {result}")
 
