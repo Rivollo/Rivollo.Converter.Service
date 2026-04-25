@@ -3,10 +3,9 @@ Blender headless script: GLB → USDZ conversion.
 Works on Mac (Quick Look) and iPhone (iOS Quick Look / AR).
 
 Strategy:
-  - Export to .usdc so Blender writes textures as real files on disk.
-  - Manually pack .usdc + all textures into a USDZ ZIP with STORE compression.
-  - This guarantees textures are INSIDE the archive — required for iPhone.
-  - Mac also reads textures from inside the ZIP, so both platforms work.
+  - Export directly to .usdz — Blender natively embeds textures inside the ZIP.
+  - Repack the ZIP with explicit STORE compression (iOS rejects DEFLATE).
+  - Verify the archive has the correct structure before finishing.
 
 Called via:
   blender --background --python glb_to_usdz.py \
@@ -38,38 +37,35 @@ def parse_args():
     return input_path, output_path
 
 
-def build_usdz(stage_dir: str, usdz_path: str) -> None:
+def repack_as_store(usdz_path: str) -> None:
     """
-    Pack everything in stage_dir into a USDZ ZIP.
+    Repack the USDZ ZIP with STORE compression on every entry.
 
-    USDZ requirements (Mac + iPhone):
-      - ZIP with STORE compression only — no DEFLATE.
-      - Primary .usdc must be the FIRST entry in the archive.
-      - Texture paths inside ZIP must match what .usdc references (relative paths).
+    iOS Quick Look requires:
+      - ZIP_STORED compression — DEFLATE causes 'No file to preview'.
+      - Primary .usdc as the FIRST entry in the archive.
     """
-    all_files = []
-    for root, _, files in os.walk(stage_dir):
-        for f in files:
-            full_path = os.path.join(root, f)
-            arc_name = os.path.relpath(full_path, stage_dir).replace(os.sep, "/")
-            all_files.append((full_path, arc_name))
+    tmp_path = usdz_path + ".tmp"
 
-    if not all_files:
-        raise RuntimeError(f"Nothing to pack — staging directory is empty: {stage_dir}")
+    with zipfile.ZipFile(usdz_path, "r") as src:
+        entries = src.infolist()
 
-    # .usdc must be first — both Mac and iPhone Quick Look read entry[0] as scene root
-    all_files.sort(key=lambda x: (
-        0 if x[1].lower().endswith((".usdc", ".usda", ".usd")) else 1,
-        x[1],
-    ))
+        print(f"[Blender] Original USDZ contents: {[e.filename for e in entries]}")
 
-    print(f"[Blender] Packing into USDZ: {[x[1] for x in all_files]}")
+        # .usdc must be first entry — iOS reads entry[0] as the scene root
+        entries.sort(key=lambda e: (
+            0 if e.filename.lower().endswith((".usdc", ".usda", ".usd")) else 1,
+            e.filename,
+        ))
 
-    with zipfile.ZipFile(usdz_path, "w", compression=zipfile.ZIP_STORED) as zf:
-        for full_path, arc_name in all_files:
-            zf.write(full_path, arc_name, compress_type=zipfile.ZIP_STORED)
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_STORED) as dst:
+            for entry in entries:
+                # compress_type on writestr overrides ZipInfo.compress_type —
+                # without this, ZipInfo carries the original DEFLATE and STORE is ignored.
+                dst.writestr(entry, src.read(entry.filename), compress_type=zipfile.ZIP_STORED)
 
-    print(f"[Blender] USDZ written: {usdz_path} ({os.path.getsize(usdz_path)} bytes)")
+    os.replace(tmp_path, usdz_path)
+    print(f"[Blender] Repacked as STORE compression (iOS compatible)")
 
 
 def verify_usdz(path: str) -> bool:
@@ -82,15 +78,24 @@ def verify_usdz(path: str) -> bool:
         entries = zf.infolist()
         names = [e.filename for e in entries]
 
+        # Must contain a USD file
         usd_names = [n for n in names if n.lower().endswith((".usdc", ".usda", ".usd"))]
         if not usd_names:
             print(f"[Blender] ERROR: no USD file in archive. Contents: {names}")
             return False
 
+        # USD file must be first entry
         if not entries[0].filename.lower().endswith((".usdc", ".usda", ".usd")):
             print(f"[Blender] ERROR: first entry is not a USD file: {entries[0].filename}")
             return False
 
+        # Must have textures inside the ZIP — no textures = grey/blank on iPhone
+        texture_exts = (".png", ".jpg", ".jpeg")
+        texture_names = [n for n in names if n.lower().endswith(texture_exts)]
+        if not texture_names:
+            print(f"[Blender] WARNING: no texture files found in archive — model may appear grey")
+
+        # All entries must be STORE — iOS rejects DEFLATE
         compressed = [e.filename for e in entries if e.compress_type != zipfile.ZIP_STORED]
         if compressed:
             print(f"[Blender] ERROR: compressed entries — iPhone will reject: {compressed}")
@@ -128,6 +133,7 @@ def main():
     bpy.ops.object.mode_set(mode="OBJECT")
     bpy.ops.object.select_all(action="DESELECT")
 
+    # make_single_user prevents transform_apply crash on instanced meshes
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.make_single_user(object=True, obdata=True)
     bpy.ops.object.select_all(action="DESELECT")
@@ -138,8 +144,10 @@ def main():
         bpy.context.view_layer.objects.active = obj
         obj.select_set(True)
 
+        # Bake transforms into vertex positions for correct USD placement
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
+        # iPhone Quick Look requires triangle-only meshes
         tri_mod = obj.modifiers.new(name="Triangulate", type="TRIANGULATE")
         tri_mod.quad_method = "BEAUTY"
         tri_mod.ngon_method = "BEAUTY"
@@ -149,16 +157,13 @@ def main():
 
     bpy.ops.object.select_all(action="DESELECT")
 
-    # ── Step 5: Export to .usdc in a staging folder ───────────────────
-    # Blender writes model.usdc + textures/ folder on disk.
-    # We then manually pack both into the USDZ ZIP (Step 6).
-    stage_dir = output_path + ".stage"
-    os.makedirs(stage_dir, exist_ok=True)
-    usdc_path = os.path.join(stage_dir, "model.usdc")
-
-    print(f"[Blender] Exporting USDC to: {stage_dir}")
+    # ── Step 5: Export directly to .usdz ─────────────────────────────
+    # Blender's native .usdz export embeds textures inside the ZIP.
+    # generate_preview_surface converts materials to UsdPreviewSurface —
+    # the only shader iOS Quick Look understands.
+    print(f"[Blender] Exporting USDZ: {output_path}")
     export_result = bpy.ops.wm.usd_export(
-        filepath=usdc_path,
+        filepath=output_path,
         export_materials=True,
         generate_preview_surface=True,
         export_textures_mode="NEW",
@@ -169,20 +174,12 @@ def main():
     if export_result != {"FINISHED"}:
         raise RuntimeError(f"USD export failed — operator returned: {export_result}")
 
-    if not os.path.exists(usdc_path):
-        raise RuntimeError(f"model.usdc not found after export in: {stage_dir}")
-
-    staged = []
-    for root, _, files in os.walk(stage_dir):
-        for f in files:
-            staged.append(os.path.relpath(os.path.join(root, f), stage_dir))
-    print(f"[Blender] Staged files (usdc + textures): {staged}")
-
-    # ── Step 6: Pack usdc + textures into USDZ ZIP ───────────────────
-    build_usdz(stage_dir, output_path)
-
     if not os.path.exists(output_path):
-        raise RuntimeError(f"USDZ not created at: {output_path}")
+        raise RuntimeError(f"Export reported FINISHED but file not found: {output_path}")
+
+    # ── Step 6: Repack as STORE compression ───────────────────────────
+    # Blender may use DEFLATE — iOS rejects any compression other than STORE.
+    repack_as_store(output_path)
 
     # ── Step 7: Validate ─────────────────────────────────────────────
     if not verify_usdz(output_path):
