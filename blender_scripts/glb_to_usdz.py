@@ -1,11 +1,15 @@
 """
 Blender headless script: GLB → USDZ conversion.
+Works on Mac (Quick Look) and iPhone (iOS Quick Look / AR).
 
-Confirmed working on Blender 5.0.1 (snap) on Ubuntu.
-Blender 5.0 supports native .usdz export — no manual zip workaround needed.
+Strategy:
+  - Export to .usdc so Blender writes textures as real files on disk.
+  - Manually pack .usdc + all textures into a USDZ ZIP with STORE compression.
+  - This guarantees textures are INSIDE the archive — required for iPhone.
+  - Mac also reads textures from inside the ZIP, so both platforms work.
 
 Called via:
-  blender --background --python app/services/blender_scripts/glb_to_usdz.py \
+  blender --background --python glb_to_usdz.py \
           -- --input /path/to/model.glb --output /path/to/model.usdz
 """
 
@@ -16,7 +20,6 @@ import bpy
 
 
 def parse_args():
-    """Parse args after '--' separator (Blender's custom arg convention)."""
     argv = sys.argv
     if "--" not in argv:
         raise ValueError(
@@ -35,51 +38,62 @@ def parse_args():
     return input_path, output_path
 
 
-def repack_usdz_ios_compatible(path: str) -> None:
+def build_usdz(stage_dir: str, usdz_path: str) -> None:
     """
-    Repack the USDZ as an uncompressed ZIP (ZIP_STORED).
-    iOS Quick Look strictly requires STORE compression — DEFLATE causes "No file to preview".
-    The primary .usdc/.usda file must also be the first entry in the archive.
+    Pack everything in stage_dir into a USDZ ZIP.
+
+    USDZ requirements (Mac + iPhone):
+      - ZIP with STORE compression only — no DEFLATE.
+      - Primary .usdc must be the FIRST entry in the archive.
+      - Texture paths inside ZIP must match what .usdc references (relative paths).
     """
-    tmp_path = path + ".repack.tmp"
-    with zipfile.ZipFile(path, "r") as src:
-        entries = src.infolist()
-        # Primary USD file must be first — iOS Quick Look reads the first entry as the scene root
-        entries.sort(key=lambda e: (
-            0 if e.filename.lower().endswith((".usdc", ".usda", ".usd")) else 1,
-            e.filename,
-        ))
-        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_STORED) as dst:
-            for entry in entries:
-                dst.writestr(entry, src.read(entry.filename), compress_type=zipfile.ZIP_STORED)
-    os.replace(tmp_path, path)
-    print(f"[Blender] Repacked USDZ as uncompressed ZIP (iOS compatible)")
+    all_files = []
+    for root, _, files in os.walk(stage_dir):
+        for f in files:
+            full_path = os.path.join(root, f)
+            arc_name = os.path.relpath(full_path, stage_dir).replace(os.sep, "/")
+            all_files.append((full_path, arc_name))
+
+    if not all_files:
+        raise RuntimeError(f"Nothing to pack — staging directory is empty: {stage_dir}")
+
+    # .usdc must be first — both Mac and iPhone Quick Look read entry[0] as scene root
+    all_files.sort(key=lambda x: (
+        0 if x[1].lower().endswith((".usdc", ".usda", ".usd")) else 1,
+        x[1],
+    ))
+
+    print(f"[Blender] Packing into USDZ: {[x[1] for x in all_files]}")
+
+    with zipfile.ZipFile(usdz_path, "w", compression=zipfile.ZIP_STORED) as zf:
+        for full_path, arc_name in all_files:
+            zf.write(full_path, arc_name, compress_type=zipfile.ZIP_STORED)
+
+    print(f"[Blender] USDZ written: {usdz_path} ({os.path.getsize(usdz_path)} bytes)")
 
 
 def verify_usdz(path: str) -> bool:
-    """Confirm output is a valid, iOS-compatible USDZ."""
+    """Verify the USDZ is valid for Mac and iPhone."""
     if not zipfile.is_zipfile(path):
-        print(f"[Blender] ERROR: output is not a valid ZIP file: {path}")
+        print(f"[Blender] ERROR: not a valid ZIP: {path}")
         return False
 
     with zipfile.ZipFile(path, "r") as zf:
         entries = zf.infolist()
         names = [e.filename for e in entries]
 
-        # Must contain at least one USD file
-        if not any(n.lower().endswith((".usdc", ".usda", ".usd")) for n in names):
-            print(f"[Blender] ERROR: no .usdc/.usda/.usd found in archive. Contents: {names}")
+        usd_names = [n for n in names if n.lower().endswith((".usdc", ".usda", ".usd"))]
+        if not usd_names:
+            print(f"[Blender] ERROR: no USD file in archive. Contents: {names}")
             return False
 
-        # USD file must be the first entry — iOS Quick Look reads entry[0] as scene root
         if not entries[0].filename.lower().endswith((".usdc", ".usda", ".usd")):
-            print(f"[Blender] ERROR: first archive entry is not a USD file: {entries[0].filename}")
+            print(f"[Blender] ERROR: first entry is not a USD file: {entries[0].filename}")
             return False
 
-        # All entries must use STORE — iOS rejects DEFLATE and shows "No file to preview"
         compressed = [e.filename for e in entries if e.compress_type != zipfile.ZIP_STORED]
         if compressed:
-            print(f"[Blender] ERROR: compressed entries found — iOS will reject: {compressed}")
+            print(f"[Blender] ERROR: compressed entries — iPhone will reject: {compressed}")
             return False
 
         print(f"[Blender] USDZ verified OK. Contents: {names}")
@@ -92,7 +106,7 @@ def main():
     # ── Step 1: Clear default scene ───────────────────────────────────
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
-    # ── Step 2: Enable GLB import addon (required in headless Blender) ─
+    # ── Step 2: Enable GLB import addon ──────────────────────────────
     import addon_utils
     addon_utils.enable("io_scene_gltf2", default_set=False)
 
@@ -105,18 +119,15 @@ def main():
     mesh_objects = [o for o in bpy.context.scene.objects if o.type == "MESH"]
     if not mesh_objects:
         raise RuntimeError(
-            "GLB import produced no mesh objects — file may be empty, "
-            "contain only cameras/lights, or use an unsupported feature."
+            "GLB import produced no mesh objects — file may be empty "
+            "or contain only cameras/lights."
         )
     print(f"[Blender] Imported {len(mesh_objects)} mesh object(s)")
 
     # ── Step 4: Prepare meshes ────────────────────────────────────────
-    # Guarantee Object Mode — transform_apply and modifier_apply both require it.
     bpy.ops.object.mode_set(mode="OBJECT")
     bpy.ops.object.select_all(action="DESELECT")
 
-    # Make every mesh data-block single-user so transform_apply does not fail
-    # on GLB files that use instanced geometry (multiple objects sharing one mesh).
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.make_single_user(object=True, obdata=True)
     bpy.ops.object.select_all(action="DESELECT")
@@ -127,10 +138,8 @@ def main():
         bpy.context.view_layer.objects.active = obj
         obj.select_set(True)
 
-        # Bake world-space transforms into vertex positions for correct USD placement.
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
-        # iPhone Quick Look requires triangle-only meshes — quads/ngons are invisible.
         tri_mod = obj.modifiers.new(name="Triangulate", type="TRIANGULATE")
         tri_mod.quad_method = "BEAUTY"
         tri_mod.ngon_method = "BEAUTY"
@@ -140,14 +149,16 @@ def main():
 
     bpy.ops.object.select_all(action="DESELECT")
 
-    # ── Step 5: Export to .usdz ───────────────────────────────────────
-    # generate_preview_surface: converts Blender materials to UsdPreviewSurface —
-    #   Apple's required PBR shader for correct rendering in iPhone Quick Look.
-    # export_textures_mode='NEW': copies texture images into the USDZ archive
-    #   so there are no external references iOS cannot resolve.
-    print(f"[Blender] Exporting USDZ: {output_path}")
+    # ── Step 5: Export to .usdc in a staging folder ───────────────────
+    # Blender writes model.usdc + textures/ folder on disk.
+    # We then manually pack both into the USDZ ZIP (Step 6).
+    stage_dir = output_path + ".stage"
+    os.makedirs(stage_dir, exist_ok=True)
+    usdc_path = os.path.join(stage_dir, "model.usdc")
+
+    print(f"[Blender] Exporting USDC to: {stage_dir}")
     export_result = bpy.ops.wm.usd_export(
-        filepath=output_path,
+        filepath=usdc_path,
         export_materials=True,
         generate_preview_surface=True,
         export_textures_mode="NEW",
@@ -158,19 +169,24 @@ def main():
     if export_result != {"FINISHED"}:
         raise RuntimeError(f"USD export failed — operator returned: {export_result}")
 
-    # ── Step 6: Repack as iOS-compatible uncompressed ZIP ────────────
+    if not os.path.exists(usdc_path):
+        raise RuntimeError(f"model.usdc not found after export in: {stage_dir}")
+
+    staged = []
+    for root, _, files in os.walk(stage_dir):
+        for f in files:
+            staged.append(os.path.relpath(os.path.join(root, f), stage_dir))
+    print(f"[Blender] Staged files (usdc + textures): {staged}")
+
+    # ── Step 6: Pack usdc + textures into USDZ ZIP ───────────────────
+    build_usdz(stage_dir, output_path)
+
     if not os.path.exists(output_path):
-        raise RuntimeError(
-            f"USD export reported FINISHED but output file not found: {output_path}"
-        )
+        raise RuntimeError(f"USDZ not created at: {output_path}")
 
-    repack_usdz_ios_compatible(output_path)
-
-    # ── Step 7: Validate output ───────────────────────────────────────
+    # ── Step 7: Validate ─────────────────────────────────────────────
     if not verify_usdz(output_path):
-        raise RuntimeError(
-            f"Output failed iOS compatibility checks (see above). Path: {output_path}"
-        )
+        raise RuntimeError(f"USDZ failed validation. Path: {output_path}")
 
     print(f"[Blender] Done → {output_path} ({os.path.getsize(output_path)} bytes)")
 
