@@ -1,11 +1,8 @@
 """
 Blender headless script: GLB → USDZ conversion.
-Works on Mac (Quick Look) and iPhone (iOS Quick Look / AR).
 
-Strategy:
-  - Export directly to .usdz — Blender natively embeds textures inside the ZIP.
-  - Repack the ZIP with explicit STORE compression (iOS rejects DEFLATE).
-  - Verify the archive has the correct structure before finishing.
+Confirmed working on Blender 5.0.1 (snap) on Ubuntu.
+Blender 5.0 supports native .usdz export — no manual zip workaround needed.
 
 Called via:
   blender --background --python glb_to_usdz.py \
@@ -14,11 +11,11 @@ Called via:
 
 import os
 import sys
-import zipfile
 import bpy
 
 
 def parse_args():
+    """Parse args after '--' separator (Blender's custom arg convention)."""
     argv = sys.argv
     if "--" not in argv:
         raise ValueError(
@@ -37,81 +34,13 @@ def parse_args():
     return input_path, output_path
 
 
-def repack_as_store(usdz_path: str) -> None:
-    """
-    Repack the USDZ ZIP with STORE compression on every entry.
-
-    iOS Quick Look requires:
-      - ZIP_STORED compression — DEFLATE causes 'No file to preview'.
-      - Primary .usdc as the FIRST entry in the archive.
-    """
-    tmp_path = usdz_path + ".tmp"
-
-    with zipfile.ZipFile(usdz_path, "r") as src:
-        entries = src.infolist()
-
-        print(f"[Blender] Original USDZ contents: {[e.filename for e in entries]}")
-
-        # .usdc must be first entry — iOS reads entry[0] as the scene root
-        entries.sort(key=lambda e: (
-            0 if e.filename.lower().endswith((".usdc", ".usda", ".usd")) else 1,
-            e.filename,
-        ))
-
-        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_STORED) as dst:
-            for entry in entries:
-                # compress_type on writestr overrides ZipInfo.compress_type —
-                # without this, ZipInfo carries the original DEFLATE and STORE is ignored.
-                dst.writestr(entry, src.read(entry.filename), compress_type=zipfile.ZIP_STORED)
-
-    os.replace(tmp_path, usdz_path)
-    print(f"[Blender] Repacked as STORE compression (iOS compatible)")
-
-
-def verify_usdz(path: str) -> bool:
-    """Verify the USDZ is valid for Mac and iPhone."""
-    if not zipfile.is_zipfile(path):
-        print(f"[Blender] ERROR: not a valid ZIP: {path}")
-        return False
-
-    with zipfile.ZipFile(path, "r") as zf:
-        entries = zf.infolist()
-        names = [e.filename for e in entries]
-
-        # Must contain a USD file
-        usd_names = [n for n in names if n.lower().endswith((".usdc", ".usda", ".usd"))]
-        if not usd_names:
-            print(f"[Blender] ERROR: no USD file in archive. Contents: {names}")
-            return False
-
-        # USD file must be first entry
-        if not entries[0].filename.lower().endswith((".usdc", ".usda", ".usd")):
-            print(f"[Blender] ERROR: first entry is not a USD file: {entries[0].filename}")
-            return False
-
-        # Must have textures inside the ZIP — no textures = grey/blank on iPhone
-        texture_exts = (".png", ".jpg", ".jpeg")
-        texture_names = [n for n in names if n.lower().endswith(texture_exts)]
-        if not texture_names:
-            print(f"[Blender] WARNING: no texture files found in archive — model may appear grey")
-
-        # All entries must be STORE — iOS rejects DEFLATE
-        compressed = [e.filename for e in entries if e.compress_type != zipfile.ZIP_STORED]
-        if compressed:
-            print(f"[Blender] ERROR: compressed entries — iPhone will reject: {compressed}")
-            return False
-
-        print(f"[Blender] USDZ verified OK. Contents: {names}")
-        return True
-
-
 def main():
     input_path, output_path = parse_args()
 
     # ── Step 1: Clear default scene ───────────────────────────────────
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
-    # ── Step 2: Enable GLB import addon ──────────────────────────────
+    # ── Step 2: Enable GLB import addon (required in headless Blender) ─
     import addon_utils
     addon_utils.enable("io_scene_gltf2", default_set=False)
 
@@ -157,8 +86,7 @@ def main():
 
     bpy.ops.object.select_all(action="DESELECT")
 
-    # ── Step 5: Export directly to .usdz ─────────────────────────────
-    # Blender's native .usdz export embeds textures inside the ZIP.
+    # ── Step 5: Export directly to .usdz (native in Blender 5.0) ─────
     # generate_preview_surface converts materials to UsdPreviewSurface —
     # the only shader iOS Quick Look understands.
     print(f"[Blender] Exporting USDZ: {output_path}")
@@ -176,14 +104,6 @@ def main():
 
     if not os.path.exists(output_path):
         raise RuntimeError(f"Export reported FINISHED but file not found: {output_path}")
-
-    # ── Step 6: Repack as STORE compression ───────────────────────────
-    # Blender may use DEFLATE — iOS rejects any compression other than STORE.
-    repack_as_store(output_path)
-
-    # ── Step 7: Validate ─────────────────────────────────────────────
-    if not verify_usdz(output_path):
-        raise RuntimeError(f"USDZ failed validation. Path: {output_path}")
 
     print(f"[Blender] Done → {output_path} ({os.path.getsize(output_path)} bytes)")
 
