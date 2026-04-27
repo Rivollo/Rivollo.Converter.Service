@@ -27,6 +27,7 @@ def _run_blender_sync(glb_path: str, usdz_path: str, job_id: str) -> None:
         "--",
         "--input", glb_path,
         "--output", usdz_path,
+        "--bake-resolution", str(settings.bake_resolution),
     ]
 
     logger.info(f"[Job {job_id}] Blender command: {' '.join(cmd)}")
