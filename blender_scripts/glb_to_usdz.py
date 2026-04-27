@@ -23,15 +23,17 @@ def parse_args():
             "-- --input <glb_path> --output <usdz_path>"
         )
     args = argv[argv.index("--") + 1:]
-    input_path, output_path = None, None
+    input_path, output_path, bake_resolution = None, None, 1024
     for i, arg in enumerate(args):
         if arg == "--input":
             input_path = args[i + 1]
         elif arg == "--output":
             output_path = args[i + 1]
+        elif arg == "--bake-resolution":
+            bake_resolution = int(args[i + 1])
     if not input_path or not output_path:
         raise ValueError("Both --input and --output are required.")
-    return input_path, output_path
+    return input_path, output_path, bake_resolution
 
 
 def bake_vertex_colors(obj, tex_dir, bake_size=2048):
@@ -106,7 +108,7 @@ def bake_vertex_colors(obj, tex_dir, bake_size=2048):
 
 
 def main():
-    input_path, output_path = parse_args()
+    input_path, output_path, bake_resolution = parse_args()
 
     tex_dir = os.path.join(os.path.dirname(output_path), "textures")
     os.makedirs(tex_dir, exist_ok=True)
@@ -149,7 +151,7 @@ def main():
         print("[Blender] No image textures found — baking vertex colors to texture")
         for obj in bpy.data.objects:
             if obj.type == 'MESH' and obj.data.color_attributes:
-                bake_vertex_colors(obj, tex_dir)
+                bake_vertex_colors(obj, tex_dir, bake_size=bake_resolution)
 
     # ── Step 5: Export to .usdz ───────────────────────────────────────
     print(f"[Blender] Exporting USDZ: {output_path}")
