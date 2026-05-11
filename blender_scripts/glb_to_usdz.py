@@ -76,9 +76,9 @@ def bake_vertex_colors(obj, tex_dir, bake_size=2048):
     # Add image texture node (target for bake)
     img_node = nodes.new("ShaderNodeTexImage")
     img_node.image = bake_img
-    nodes.active = img_node  # Must be active for baking
+    nodes.active = img_node
 
-    # Add vertex color node and connect to Principled BSDF base color
+    # Add vertex color node
     vcol_node = nodes.new("ShaderNodeVertexColor")
     vcol_node.layer_name = mesh.color_attributes[0].name
     principled = next((n for n in nodes if n.type == 'BSDF_PRINCIPLED'), None)
@@ -95,14 +95,30 @@ def bake_vertex_colors(obj, tex_dir, bake_size=2048):
     bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, save_mode='INTERNAL')
 
     bake_img.save()
-    print(f"[Blender] Baked vertex colors → {bake_img.filepath_raw}")
+    print(f"[Blender] Baked vertex colors → "f" {bake_img.filepath_raw}")
 
-    # Replace vertex color node with UV image texture node in material
+    # -----------------------------------------------------------------
+    # CLEAN MATERIAL GRAPH FOR APPLE QUICKLOOK
+    # -----------------------------------------------------------------
+
+    # Remove unsupported nodes except Principled + Output
+    for node in list(nodes):
+
+        if node.type not in {
+            'BSDF_PRINCIPLED',
+            'OUTPUT_MATERIAL'
+        }:
+            nodes.remove(node)
+
+    # Recreate clean texture pipeline
+    img_node = nodes.new("ShaderNodeTexImage")
+    img_node.image = bake_img
     uv_node = nodes.new("ShaderNodeTexCoord")
     links.new(uv_node.outputs['UV'], img_node.inputs['Vector'])
+    
+    principled = next((n for n in nodes if n.type == 'BSDF_PRINCIPLED'), None)
     if principled:
         links.new(img_node.outputs['Color'], principled.inputs['Base Color'])
-    nodes.remove(vcol_node)
 
     return bake_img
 
@@ -116,7 +132,7 @@ def main():
     # ── Step 1: Clear default scene ───────────────────────────────────
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
-    # ── Step 2: Enable GLB import addon (required in headless Blender) ─
+    # ── Step 2: Enable GLB import addon (required in headless Blender)
     import addon_utils
     addon_utils.enable("io_scene_gltf2", default_set=False)
 
@@ -144,15 +160,20 @@ def main():
                 image.save()
                 image.unpack(method='USE_LOCAL')
                 unpacked += 1
-        print(f"[Blender] Unpacked {unpacked} image texture(s)")
+        print(f"[Blender] Unpacked "f"{unpacked} image texture(s)")
 
     elif has_vertex_colors:
         # Bake vertex colors to image textures
-        print("[Blender] No image textures found — baking vertex colors to texture")
+        print("[Blender] No image textures found — "
+            "baking vertex colors to texture"
+        )
         for obj in bpy.data.objects:
-            if obj.type == 'MESH' and obj.data.color_attributes:
+            if (obj.type == 'MESH' and obj.data.color_attributes):
                 bake_vertex_colors(obj, tex_dir, bake_size=bake_resolution)
 
+    # Force correct texture color space
+    for image in bpy.data.images:
+        image.colorspace_settings.name = 'sRGB'
     # ── Step 5: Export to .usdz ───────────────────────────────────────
     print(f"[Blender] Exporting USDZ: {output_path}")
     result = bpy.ops.wm.usd_export(
@@ -167,9 +188,15 @@ def main():
     print(f"[Blender] Export result: {result}")
 
     if not os.path.exists(output_path):
-        raise RuntimeError(f"USD export returned {result} but file not found: {output_path}")
+        raise RuntimeError(
+            f"USD export returned {result} "
+            f"but file not found: {output_path}"
+        )
 
-    print(f"[Blender] Done → {output_path} ({os.path.getsize(output_path)} bytes)")
+    print(
+        f"[Blender] Done → {output_path} "
+        f"({os.path.getsize(output_path)} bytes)"
+    )
 
 
 if __name__ == "__main__":
