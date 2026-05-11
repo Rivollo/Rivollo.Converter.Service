@@ -5,6 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update --fix-missing && apt-get install -y --no-install-recommends --fix-missing \
     wget \
     curl \
+    ca-certificates \
     python3.11 \
     python3.11-venv \
     python3-pip \
@@ -15,10 +16,11 @@ RUN apt-get update --fix-missing && apt-get install -y --no-install-recommends -
     libsm6 \
     libxxf86vm1 \
     libgl1 \
+    libglib2.0-0 \
     xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-ARG BLENDER_VERSION=5.0.0
+ARG BLENDER_VERSION=5.0.1
 ARG BLENDER_MIRROR=https://download.blender.org/release/Blender5.0
 
 RUN wget -q "${BLENDER_MIRROR}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" -O /tmp/blender.tar.xz \
@@ -31,7 +33,8 @@ ENV BLENDER_BIN=/opt/blender/blender
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 

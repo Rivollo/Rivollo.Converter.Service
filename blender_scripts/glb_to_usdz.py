@@ -158,9 +158,11 @@ def main():
     result = bpy.ops.wm.usd_export(
         filepath=output_path,
         export_materials=True,
-        export_textures_mode='NEW',
+        # export_textures_mode='NEW',
+        export_textures_mode='PRESERVE',
         overwrite_textures=True,
         generate_preview_surface=True,
+        triangulate_meshes=True,
     )
     print(f"[Blender] Export result: {result}")
 
