@@ -26,7 +26,8 @@ def parse_args():
     parser.add_argument("--product-id",       required=True)
     parser.add_argument("--user-id",          required=True)
     parser.add_argument("--product-name",     required=True)
-    parser.add_argument("--callback-url",     required=False, default=None)
+    parser.add_argument("--callback-url",     required=False, default=None)    
+    parser.add_argument("--bake-resolution",  required=False,type=int,default=1024)
     return parser.parse_args()
 
 
@@ -40,6 +41,7 @@ async def run_job() -> None:
     user_id          = args.user_id
     product_name     = args.product_name
     callback_url     = args.callback_url
+    bake_resolution = args.bake_resolution
 
     logger.info(f"[Job {job_id}] Starting — product={product_id} user={user_id}")
 
@@ -53,7 +55,7 @@ async def run_job() -> None:
         await download_glb(glb_blob_url, glb_path)
 
         logger.info(f"[Job {job_id}] Running Blender conversion")
-        await run_blender_conversion(glb_path, usdz_path, job_id)
+        await run_blender_conversion(glb_path, usdz_path, job_id, bake_resolution)
 
         if not os.path.exists(usdz_path):
             raise FileNotFoundError(f"USDZ file not produced at {usdz_path}")
