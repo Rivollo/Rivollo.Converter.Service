@@ -14,12 +14,12 @@ _SCRIPT_PATH = os.path.join(
 )
 
 
-async def run_blender_conversion(glb_path: str, usdz_path: str, job_id: str) -> None:
+async def run_blender_conversion(glb_path: str, usdz_path: str, job_id: str, bake_resolution: int,) -> None:
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _run_blender_sync, glb_path, usdz_path, job_id)
+    await loop.run_in_executor(None, _run_blender_sync, glb_path, usdz_path, job_id, bake_resolution)
 
 
-def _run_blender_sync(glb_path: str, usdz_path: str, job_id: str) -> None:
+def _run_blender_sync(glb_path: str, usdz_path: str, job_id: str, bake_resolution: int) -> None:
     cmd = [
         settings.blender_bin,
         "--background",
@@ -27,6 +27,7 @@ def _run_blender_sync(glb_path: str, usdz_path: str, job_id: str) -> None:
         "--",
         "--input", glb_path,
         "--output", usdz_path,
+        "--bake-resolution", str(bake_resolution),
     ]
 
     logger.info(f"[Job {job_id}] Blender command: {' '.join(cmd)}")
