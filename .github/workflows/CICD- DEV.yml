@@ -64,15 +64,21 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Configure ACR registry on Container App Job
+        run: |
+          az containerapp job registry set \
+            --name "${{ secrets.CONTAINER_APP_JOB_NAME }}" \
+            --resource-group "${{ secrets.RESOURCE_GROUP }}" \
+            --server "${{ secrets.ACR_LOGIN_SERVER }}" \
+            --username "${{ secrets.ACR_USERNAME }}" \
+            --password "${{ secrets.ACR_PASSWORD }}"
+
       - name: Update Container App Job with latest image
         run: |
           az containerapp job update \
             --name "${{ secrets.CONTAINER_APP_JOB_NAME }}" \
             --resource-group "${{ secrets.RESOURCE_GROUP }}" \
-            --image "${{ env.IMAGE_NUM }}" \
-            --registry-server "${{ secrets.ACR_LOGIN_SERVER }}" \
-            --registry-username "${{ secrets.ACR_USERNAME }}" \
-            --registry-password "${{ secrets.ACR_PASSWORD }}"
+            --image "${{ env.IMAGE_NUM }}"
 
       - name: Print pushed image digests traceability
         run: |
