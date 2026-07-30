@@ -179,8 +179,10 @@ def main():
     result = bpy.ops.wm.usd_export(
         filepath=output_path,
         export_materials=True,
-        # export_textures_mode='NEW',
-        export_textures_mode='PRESERVE',
+        # 'PRESERVE' keeps references to the texture files without copying them
+        # into the archive, so the .usdz ships geometry only and QuickLook
+        # renders it untextured.
+        export_textures_mode='NEW',
         overwrite_textures=True,
         generate_preview_surface=True,
         triangulate_meshes=True,
